@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>اختبار المايك والإشعارات</title>
+    <link rel="manifest" href="manifest.json">
+    <style>
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; background-color: #f4f4f9; }
+        .section { background: white; padding: 20px; margin-bottom: 20px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.1); }
+        button { padding: 10px 20px; margin: 5px; font-size: 16px; cursor: pointer; border: none; border-radius: 5px; background-color: #007bff; color: white; }
+        button:disabled { background-color: #ccc; cursor: not-allowed; }
+        #status { margin-top: 10px; font-weight: bold; }
+        audio { margin-top: 15px; width: 100%; }
+    </style>
+</head>
+<body>
+
+    <div class="section">
+        <h2>🎙️ اختبار المايكروفون</h2>
+        <button id="startBtn">بدء التسجيل</button>
+        <button id="stopBtn" disabled>إيقاف التسجيل</button>
+        <div id="micStatus"></div>
+        <audio id="audioPlayback" controls></audio>
+    </div>
+
+    <div class="section">
+        <h2>🔔 اختبار الإشعارات</h2>
+        <button id="permBtn">طلب صلاحية الإشعارات</button>
+        <button id="notifyBtn" disabled>إرسال إشعار تجريبي</button>
+        <div id="notifStatus">ملاحظة: في الآيفون، يجب إضافة الموقع للشاشة الرئيسية أولاً.</div>
+    </div>
+
+    <script>
+        // --- إعداد الـ Service Worker (مطلوب للإشعارات) ---
+        let swRegistration = null;
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js').then(reg => {
+                swRegistration = reg;
+                console.log('Service Worker Registered');
+            }).catch(err => console.error('SW Error:', err));
+        }
+
+        // --- كود المايكروفون والتسجيل ---
+        let mediaRecorder;
+        let audioChunks = [];
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                mediaRecorder = new MediaRecorder(stream);
+                
+                mediaRecorder.ondataavailable = event => {
+                    if (event.data.size > 0) audioChunks.push(event.data);
+                };
+
+                mediaRecorder.onstop = () => {
+                    const audioBlob = new Blob(audioChunks);
+                    const audioUrl = URL.createObjectURL(audioBlob);
+                    document.getElementById('audioPlayback').src = audioUrl;
+                    audioChunks = []; // تفريغ الذاكرة للتسجيل القادم
+                };
+
+                mediaRecorder.start();
+                document.getElementById('micStatus').innerText = "🔴 جاري التسجيل...";
+                document.getElementById('micStatus').style.color = "red";
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+            } catch (error) {
+                document.getElementById('micStatus').innerText = "❌ فشل الوصول للمايكروفون: " + error.message;
+            }
+        });
+
+        document.getElementById('stopBtn').addEventListener('click', () => {
+            mediaRecorder.stop();
+            mediaRecorder.stream.getTracks().forEach(track => track.stop()); // إغلاق المايك
+            document.getElementById('micStatus').innerText = "✅ تم إيقاف التسجيل. يمكنك الاستماع الآن.";
+            document.getElementById('micStatus').style.color = "green";
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('stopBtn').disabled = true;
+        });
+
+        // --- كود الإشعارات ---
+        document.getElementById('permBtn').addEventListener('click', async () => {
+            if (!('Notification' in window)) {
+                alert('هذا المتصفح لا يدعم الإشعارات.');
+                return;
+            }
+            const permission = await Notification.requestPermission();
+            if (permission === 'granted') {
+                document.getElementById('notifStatus').innerText = "✅ تم منح الصلاحية!";
+                document.getElementById('notifStatus').style.color = "green";
+                document.getElementById('notifyBtn').disabled = false;
+            } else {
+                document.getElementById('notifStatus').innerText = "❌ تم رفض الصلاحية.";
+                document.getElementById('notifStatus').style.color = "red";
+            }
+        });
+
+        document.getElementById('notifyBtn').addEventListener('click', () => {
+            if (swRegistration) {
+                // استخدام الـ Service Worker لعرض الإشعار (مطلوب في iOS)
+                swRegistration.showNotification('مرحباً!', {
+                    body: 'هذا إشعار تجريبي من موقعك المرفوع على GitHub.',
+                    icon: 'https://cdn-icons-png.flaticon.com/512/2950/2950150.png'
+                });
+            } else {
+                alert('Service Worker غير مفعل.');
+            }
+        });
+    </script>
+</body>
+</html>
