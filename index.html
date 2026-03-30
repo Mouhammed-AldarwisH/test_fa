@@ -32,33 +32,63 @@
     </div>
 
     <script>
-        // --- إعداد الـ Service Worker (مطلوب للإشعارات) ---
+        // --- إعداد الـ Service Worker ---
         let swRegistration = null;
         if ('serviceWorker' in navigator) {
             navigator.serviceWorker.register('sw.js').then(reg => {
                 swRegistration = reg;
-                console.log('Service Worker Registered');
             }).catch(err => console.error('SW Error:', err));
         }
 
-        // --- كود المايكروفون والتسجيل ---
+        // --- كود المايكروفون المحدث لدعم الآيفون ---
         let mediaRecorder;
         let audioChunks = [];
+        let activeMimeType = '';
 
         document.getElementById('startBtn').addEventListener('click', async () => {
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                mediaRecorder = new MediaRecorder(stream);
+                
+                // تحديد أفضل صيغة مدعومة بناءً على الجهاز المتصل
+                let options = {};
+                if (MediaRecorder.isTypeSupported('audio/mp4')) {
+                    activeMimeType = 'audio/mp4'; // للآيفون
+                } else if (MediaRecorder.isTypeSupported('audio/webm')) {
+                    activeMimeType = 'audio/webm'; // للكمبيوتر والأندرويد
+                }
+
+                if (activeMimeType) {
+                    options = { mimeType: activeMimeType };
+                }
+
+                mediaRecorder = new MediaRecorder(stream, options);
                 
                 mediaRecorder.ondataavailable = event => {
                     if (event.data.size > 0) audioChunks.push(event.data);
                 };
 
+                // معالجة الملف عند الإيقاف
                 mediaRecorder.onstop = () => {
-                    const audioBlob = new Blob(audioChunks);
-                    const audioUrl = URL.createObjectURL(audioBlob);
-                    document.getElementById('audioPlayback').src = audioUrl;
-                    audioChunks = []; // تفريغ الذاكرة للتسجيل القادم
+                    try {
+                        // تعريف نوع الـ Blob بدقة (ضروري جداً للآيفون)
+                        const finalMimeType = activeMimeType || mediaRecorder.mimeType || 'audio/mp4';
+                        const audioBlob = new Blob(audioChunks, { type: finalMimeType });
+                        const audioUrl = URL.createObjectURL(audioBlob);
+                        
+                        const audioElement = document.getElementById('audioPlayback');
+                        audioElement.src = audioUrl;
+                        audioElement.load(); // إجبار المتصفح على تحميل الملف المرفق
+                        
+                        audioChunks = []; // تفريغ الذاكرة
+                    } catch (err) {
+                        document.getElementById('micStatus').innerText = "❌ فشل إنشاء ملف الصوت: " + err.message;
+                    }
+                };
+
+                // التقاط أخطاء المسجل نفسه
+                mediaRecorder.onerror = event => {
+                    document.getElementById('micStatus').innerText = "❌ خطأ في التسجيل: " + event.error.message;
+                    document.getElementById('micStatus').style.color = "red";
                 };
 
                 mediaRecorder.start();
@@ -68,16 +98,19 @@
                 document.getElementById('stopBtn').disabled = false;
             } catch (error) {
                 document.getElementById('micStatus').innerText = "❌ فشل الوصول للمايكروفون: " + error.message;
+                document.getElementById('micStatus').style.color = "red";
             }
         });
 
         document.getElementById('stopBtn').addEventListener('click', () => {
-            mediaRecorder.stop();
-            mediaRecorder.stream.getTracks().forEach(track => track.stop()); // إغلاق المايك
-            document.getElementById('micStatus').innerText = "✅ تم إيقاف التسجيل. يمكنك الاستماع الآن.";
-            document.getElementById('micStatus').style.color = "green";
-            document.getElementById('startBtn').disabled = false;
-            document.getElementById('stopBtn').disabled = true;
+            if (mediaRecorder && mediaRecorder.state !== "inactive") {
+                mediaRecorder.stop();
+                mediaRecorder.stream.getTracks().forEach(track => track.stop()); // إغلاق المايك
+                document.getElementById('micStatus').innerText = "✅ تم إيقاف التسجيل. يمكنك الاستماع الآن.";
+                document.getElementById('micStatus').style.color = "green";
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('stopBtn').disabled = true;
+            }
         });
 
         // --- كود الإشعارات ---
@@ -99,9 +132,8 @@
 
         document.getElementById('notifyBtn').addEventListener('click', () => {
             if (swRegistration) {
-                // استخدام الـ Service Worker لعرض الإشعار (مطلوب في iOS)
                 swRegistration.showNotification('مرحباً!', {
-                    body: 'هذا إشعار تجريبي من موقعك المرفوع على GitHub.',
+                    body: 'هذا إشعار تجريبي من موقعك.',
                     icon: 'https://cdn-icons-png.flaticon.com/512/2950/2950150.png'
                 });
             } else {
